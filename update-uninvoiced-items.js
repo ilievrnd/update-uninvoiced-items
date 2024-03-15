@@ -1,23 +1,34 @@
+const fs = require('fs');
 const _ = require('lodash');
 const axios = require('axios');
 
+const URL = 'https://app.officernd.com/i/organizations/work-inn/payments' // replace with live url
+
 axios.defaults.headers.cookie = 'connect.sid=...'; // replace with live cookie
 
-const invoiceIds = ['65f1c74729ff9746627493fb']; //... invoiceIds to update fees/memberships periods, replace with customer invocies
+const invoiceIds = ['65f1c74729ff9746627493fb']; //... invoiceIds to update fees/memberships periods, replace with customer invoices
+
+function writeErrorToFile(message) {
+    fs.appendFileSync('error.log', message + '\n');
+}
+
+async function waitFor(ms) {
+    return new Promise(resolve => {
+        setTimeout(resolve, ms);
+    });
+}
 
 async function processInvoices() {
-    const chunkSize = 100;
-    for (let i = 0; i < invoiceIds.length; i += chunkSize) {
-        const chunkIds = invoiceIds.slice(i, i + chunkSize);
-        const promises = chunkIds.map(invoiceId => axios.get(`https://staging.officernd.com/i/organizations/blago-testing-bookings/payments/${invoiceId}`)); // replace url
-        const responses = await Promise.all(promises);
-        for (const response of responses) {
-            try {
-                await processInvoice(response.data);
-            } catch (err) {
-                console.log('Error processing invoice:' + response.data._id + 'Error: ' + err);
-            }
+    for (const invoiceId of invoiceIds) {
+        try {
+            const response = await axios.get(`${URL}/${invoiceId}`);
+            await processInvoice(response.data);
+        } catch (err) {
+            const errorMessage = `Error processing invoice: ${invoiceId} Error: ${err}`;
+            console.log(errorMessage);
+            writeErrorToFile(errorMessage);
         }
+        await waitFor(300); // Wait for 0.3 seconds
     }
 }
 
@@ -28,7 +39,6 @@ async function processInvoice(invoice) {
 
         if (_.isEmpty(memberships) && _.isEmpty(fees)) return;
 
-        // Execute POST and PUT requests
         await detachInvoice(invoice._id, memberships, fees); // needed first to make lines.memberships/fees -> null
         await updateInvoice(invoice._id, invoice.lines); // same invoice lines, in order to update the corresponding memberships/fees invoice periods
     }
@@ -42,19 +52,20 @@ async function detachInvoice(invoiceId, memberships, fees) {
         fee
     }))];
 
-    await axios.post(`https://staging.officernd.com/i/organizations/blago-testing-bookings/payments/65f1c74729ff9746627493fb/detach`, body);
-    console.log(`Invoice ${invoiceId} detached successfully with ${body}`);
+    await axios.post(`${URL}/${invoiceId}/detach`, body);
+    console.log(`Invoice ${invoiceId} detached successfully with ${JSON.stringify(body)}`);
 }
-
 
 async function updateInvoice(invoiceId, lines) {
     try {
-        await axios.put(`https://staging.officernd.com/i/organizations/blago-testing-bookings/payments/${invoiceId}`, {
+        await axios.put(`${URL}/${invoiceId}`, {
             lines
         });
         console.log(`Invoice ${invoiceId} updated successfully.`);
     } catch (error) {
-        console.error(`Error updating invoice ${invoiceId}: ${error.message}`);
+        const errorMessage = `Error updating invoice ${invoiceId} with ${JSON.stringify(lines)}: ${error.message}`;
+        console.error(errorMessage);
+        writeErrorToFile(errorMessage);
     }
 }
 
